@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+<title>Free AI Log Analysis Tool</title>
+
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+
+
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+</head>
+<body>
+
+<div class="navbar">
+    <div class="nav-left">
+        <img src="{{ url_for('static', filename='icon.png') }}" alt="Logo Icon" class="logo-icon">
+        <span class="logo-text">LOG.X</span></div>
+        
+     <nav class="nav-center">
+         <ul>
+             <li><a href="/" class="nav-link">LOGX</a></li>
+             <li ><a href="/report" class="nav-link">Report</a></li>
+             <li ><a href="/visual" class="nav-link">Visual</a></li>
+             <li ><a href="/about" class="nav-link">About</a></li>
+         </ul>
+         
+     </nav>
+    <div class="nav-right">
+        <a href="#" class="nav-link">Help</a>
+        <a href="#" class="nav-link">Logout</a>
+
+    </div>
+</div>
+
+<div class="page-container">
+
+<style>
+body {
+  background: url("{{ url_for('static', filename='bg2.jpg') }}") no-repeat;
+  height: 100%;
+  /* background-attachment: fixed; */
+  background-size: cover;
+  display: grid;
+
+
+
+}
+.page-container:before {
+    content: '';
+    position: absolute;
+    top: -30vh;
+    left: -30vh;
+    right: -30vh;
+    bottom: -30vh;
+}
+
+.page-container {
+    width: 60vw;
+
+
+    border-radius: 0;
+    padding: 2rem;
+  box-shadow: 0 0 1rem 0 rgba(0, 0, 0, .2); 
+  border-radius: 5px;
+  position: relative;
+  z-index: 1;
+  background: inherit;
+  overflow: hidden;
+}
+
+.page-container:before {
+  content: "";
+  position: absolute;
+  background: inherit;
+  z-index: -1;
+
+  box-shadow: inset 0 0 2000px rgba(255, 255, 255, .5);
+filter: blur(5px); /* Was 10px */
+  margin: -20px;
+}
+</style>
+
+    <h1 class="main-heading">  <div class="hero">
+ 
+    <div class="glow-text" data-text="Free AI Log Analysis Tool.">
+     Free AI Log Analysis Tool.
+    </div>
+  </div>
+  
+  </h1>
+    <p class="subtitle">
+        Enter system logs to automatically detect issues and get actionable insights.
+    </p>
+
+    <form id="logForm" method="POST">
+        <div class="input-container">
+            <textarea name="log_input" placeholder="Enter your log content here" class="log-input" required>{{ request.form.get("log_input") or "" }}</textarea>
+            <button type="submit" class="analyze-button">Analyze Logs Now ✨</button>
+        </div>
+    </form>
+
+    <!-- Single result container -->
+    <div id="result">
+        {% if result %}
+            {% if result.error %}
+                <div class="output-div">
+                    <p style="color: red;">{{ result.error }}</p>
+                </div>
+            {% else %}
+                <div class="output-div">
+                    <div class="result-section">
+                        <div class="section-title">Log Type:</div>
+                        <div class="section-content">{{ result.log_type }}</div>
+                    </div>
+                    <div class="result-section">
+                        <div class="section-title">Explanation:</div>
+                        <div class="section-content">{{ result.explanation }}</div>
+                    </div>
+                    <div class="result-section">
+                        <div class="section-title">Possible Root Causes:</div>
+                        <div class="section-content">{{ result.possible_root_causes }}</div>
+                    </div>
+                    <div class="result-section">
+                        <div class="section-title">Troubleshooting Steps:</div>
+                        <div class="section-content">{{ result.troubleshooting_steps }}</div>
+                    </div>
+                </div>
+            {% endif %}
+        {% endif %}
+    </div>
+
+</div>
+
+<!-- Pulse Loader Overlay -->
+<div class="animation-container" id="loader">
+  <div id="pulse-wave" class="circle-container"></div>
+</div>
+
+<script>
+(function() {
+  function setupPulseWave() {
+    const container = document.getElementById("pulse-wave");
+    if (!container) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = 180;
+    canvas.height = 180;
+    container.appendChild(canvas);
+    const ctx = canvas.getContext("2d");
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    let time = 0;
+    let lastTime = 0;
+
+    const dotRings = [
+      { radius: 15, count: 6 },
+      { radius: 30, count: 12 },
+      { radius: 45, count: 18 },
+      { radius: 60, count: 24 },
+      { radius: 75, count: 30 }
+    ];
+
+    function animate(timestamp) {
+      if (!lastTime) lastTime = timestamp;
+      const deltaTime = timestamp - lastTime;
+      lastTime = timestamp;
+      time += deltaTime * 0.001;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, 2, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+      ctx.fill();
+
+      dotRings.forEach((ring, ringIndex) => {
+        for (let i = 0; i < ring.count; i++) {
+          const angle = (i / ring.count) * Math.PI * 2;
+          const radiusPulse = Math.sin(time * 2 - ringIndex * 0.4) * 3;
+          const x = centerX + Math.cos(angle) * (ring.radius + radiusPulse);
+          const y = centerY + Math.sin(angle) * (ring.radius + radiusPulse);
+          const opacityWave = 0.4 + Math.sin(time * 2 - ringIndex * 0.4 + i * 0.2) * 0.6;
+
+          ctx.beginPath();
+          ctx.arc(x, y, 2, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255, 255, 255, ${opacityWave})`;
+          ctx.fill();
+        }
+      });
+
+      requestAnimationFrame(animate);
+    }
+
+    requestAnimationFrame(animate);
+  }
+
+  window.addEventListener("load", setupPulseWave);
+})();
+</script>
+
+<script>
+const form = document.getElementById('logForm');
+const loader = document.getElementById('loader');
+const resultDiv = document.getElementById('result');
+
+form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    loader.style.display = 'flex'; // Show loader
+    resultDiv.innerHTML = '';
+
+    const formData = new FormData(form);
+    const response = await fetch("/", {
+        method: "POST",
+        body: formData
+    });
+    const html = await response.text();
+    loader.style.display = 'none'; // Hide loader
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    const newResult = doc.querySelector(".output-div");
+    if (newResult) {
+        resultDiv.innerHTML = newResult.outerHTML;
+    } else {
+        resultDiv.innerHTML = "<p style='color:red;'>Unexpected response from server.</p>";
+    }
+});
+</script>
+
+</body>
+</html>

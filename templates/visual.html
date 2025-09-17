@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Log Visualization - LOG.X</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    
+    <style>
+        body {
+          background: url("../static/bg1.webp") no-repeat;
+          background-size: cover;
+          display: grid;
+          min-height: 100vh;
+          font-family: 'Inter', sans-serif;
+          margin: 0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: auto;
+            padding: 40px 20px;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        form {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        input[type="file"] {
+            padding: 10px;
+            margin-right: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background: #4caf50;
+            border: none;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        .card {
+            background: #1a1a2e;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            margin-bottom: 30px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+        .card h2 {
+            margin: 0;
+            font-size: 2.5em;
+        }
+        #treemap {
+            height: 700px;
+        }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <div class="nav-left">
+            <img src="{{ url_for('static', filename='icon.png') }}" alt="Logo Icon" class="logo-icon">
+            <span class="logo-text">LOG.X</span>
+        </div>
+         <nav class="nav-center">
+             <ul>
+                 <li><a href="/" class="nav-link">LOGX</a></li>
+                 <li ><a href="/report" class="nav-link">Report</a></li>
+                 <li ><a href="/visual" class="nav-link">Visual</a></li>
+                 <li ><a href="/about" class="nav-link">About</a></li>
+             </ul>
+             
+         </nav>
+         
+         
+    <div class="nav-right">
+        <a href="#" class="nav-link">Help</a>
+        <a href="#" class="nav-link">Logout</a>
+
+    </div>
+    </div>
+
+
+
+    <div class="container">
+        <h1>Log Heatmap Visualization</h1>
+
+        <form method="POST" enctype="multipart/form-data">
+            <input type="file" name="logfile" required>
+            <button type="submit">Upload and Visualize</button>
+        </form>
+
+        {% if total_logs > 0 %}
+        <div class="card">
+            <h2>Total Logs: {{ total_logs }}</h2>
+        </div>
+        {% endif %}
+
+        <div id="treemap"></div>
+    </div>
+
+    <script>
+        const logData = {{ log_data|tojson }};
+        if (logData.length > 0) {
+            const labels = logData.map(item => item.log);
+            const parents = labels.map(() => "");
+            const values = logData.map(item => item.count);
+            const colors = logData.map(item => item.color);
+
+            const data = [{
+                type: "treemap",
+                labels: labels,
+                parents: parents,
+                values: values,
+                textinfo: "label+value",
+                textfont: { size: 20 },         // increase label font size
+                hoverinfo: "label+value+percent entry",
+                marker: {
+                    colors: colors,
+                    line: { width: 2, color: 'rgba(255,255,255,0.3)' }
+                }
+            }];
+
+            const layout = {
+                margin: { t: 50, l: 25, r: 25, b: 25 },
+                paper_bgcolor: "#0e0e17",
+                plot_bgcolor: "#0e0e17",
+                font: { color: "white", size: 18 } // global font size
+            };
+
+            Plotly.newPlot('treemap', data, layout);
+        }
+    </script>
+</body>
+</html>
