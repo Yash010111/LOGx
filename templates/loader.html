@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Pulse Wave Animation</title>
+<style>
+  body {
+    background: #000;
+    color: #f0f0f0;
+    font-family: monospace;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    margin: 0;
+  }
+  .animation-container {
+    position: relative;
+    width: 220px;
+    height: 220px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.5);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .circle-container {
+    position: relative;
+    width: 180px;
+    height: 180px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+</style>
+</head>
+<body>
+  <div class="animation-container">
+    <div id="pulse-wave" class="circle-container"></div>
+  </div>
+  <script>
+(function() {
+  function setupPulseWave() {
+    const container = document.getElementById("pulse-wave");
+    if (!container) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = 180;
+    canvas.height = 180;
+    container.appendChild(canvas);
+    const ctx = canvas.getContext("2d");
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    let time = 0;
+    let lastTime = 0;
+
+    const dotRings = [
+      { radius: 15, count: 6 },
+      { radius: 30, count: 12 },
+      { radius: 45, count: 18 },
+      { radius: 60, count: 24 },
+      { radius: 75, count: 30 }
+    ];
+
+    function animate(timestamp) {
+      if (!lastTime) lastTime = timestamp;
+      const deltaTime = timestamp - lastTime;
+      lastTime = timestamp;
+      time += deltaTime * 0.001;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, 2, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+      ctx.fill();
+
+      dotRings.forEach((ring, ringIndex) => {
+        for (let i = 0; i < ring.count; i++) {
+          const angle = (i / ring.count) * Math.PI * 2;
+          const radiusPulse = Math.sin(time * 2 - ringIndex * 0.4) * 3;
+          const x = centerX + Math.cos(angle) * (ring.radius + radiusPulse);
+          const y = centerY + Math.sin(angle) * (ring.radius + radiusPulse);
+          const opacityWave = 0.4 + Math.sin(time * 2 - ringIndex * 0.4 + i * 0.2) * 0.6;
+
+          ctx.beginPath();
+          ctx.arc(x, y, 2, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255, 255, 255, ${opacityWave})`;
+          ctx.fill();
+        }
+      });
+
+      requestAnimationFrame(animate);
+    }
+
+    requestAnimationFrame(animate);
+  }
+
+  window.addEventListener("load", setupPulseWave);
+})();
+  </script>
+</body>
+</html>
