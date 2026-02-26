@@ -300,8 +300,8 @@ This project is licensed under the MIT License - see [LICENSE](LICENSE) file for
 
 **Your Name**
 - 📧 Email: yashparaskar2@gmail.com
-- 🐙 GitHub: [@yourusername](https://github.com/Yash010111)
-- 🔗 LinkedIn: [Your Profile](https://www.linkedin.com/in/yash-paraskar-97a873271/)
+- 🐙 GitHub: [@Yash010111](https://github.com/Yash010111)
+- 🔗 LinkedIn: [Profile](https://www.linkedin.com/in/yash-paraskar-97a873271/)
 
 ### Project Links:
 - 🌐 Homepage: [GitHub Repository](https://github.com/Yash010111/logx)
