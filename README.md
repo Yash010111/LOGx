@@ -86,7 +86,8 @@ Visit: [http://127.0.0.1:5000](http://127.0.0.1:5000)
 ---
 ## 🎥 Demo Video
 
-[![Watch the demo](assets/thumbnail.jpg)](assets/demo.mp4)
+[![Watch the Demo](assets/thumbnail.jpg)](https://drive.google.com/file/d/186wp_EDFvOztcCyEDg4CURbgCT68zwx0/view?usp=sharing)
+
 ## �🚀 Usage Guide
 
 ### 1. Single Log Analysis
