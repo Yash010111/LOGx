@@ -84,7 +84,9 @@ Visit: [http://127.0.0.1:5000](http://127.0.0.1:5000)
 *LOGx utilizing GPU acceleration for efficient log analysis*
 
 ---
+## 🎥 Demo Video
 
+[![Watch the demo](assets/thumbnail.jpg)](assets/demo.mp4)
 ## �🚀 Usage Guide
 
 ### 1. Single Log Analysis
