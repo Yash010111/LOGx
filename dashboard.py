@@ -235,14 +235,20 @@ def report_pdf():
     )
 
 def open_browser():
+    url = "http://127.0.0.1:5000/"
     try:
-        webbrowser.get(using='windows-default').open("http://127.0.0.1:5000/")
+        # Try default Windows browser
+        webbrowser.get(using='windows-default').open(url)
     except:
         try:
-            webbrowser.get("edge").open("http://127.0.0.1:5000/")
+            # Try Microsoft Edge
+            webbrowser.get("edge").open(url)
         except:
-            print("⚠️ Could not open Edge. Please open http://127.0.0.1:5000/ manually.")
+            print(f"⚠️ Could not open browser. Please open {url} manually.")
 
 if __name__ == "__main__":
+    # Open browser after 1 second
     threading.Timer(1, open_browser).start()
-    app.run(debug=True, use_reloader=False)
+    
+    # Start Flask server
+    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)

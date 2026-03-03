@@ -1,0 +1,25 @@
+# Dockerfile for LOGx Flask App
+
+# Use official Python 3.12 slim image
+FROM python:3.12-slim
+
+# Set working directory inside container
+WORKDIR /app
+
+# Copy dependencies first for caching
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the project
+COPY . .
+
+# Expose the port your Flask app runs on
+EXPOSE 5000
+
+# Environment variable to prevent Flask warnings in container
+ENV FLASK_ENV=production
+
+# Start the Flask app
+CMD ["python", "dashboard.py"]
