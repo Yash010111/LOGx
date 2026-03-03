@@ -43,11 +43,13 @@ bnb_config = BitsAndBytesConfig(
     bnb_4bit_compute_dtype="bfloat16"
 )
 
+# Load Gemma 2B quantized
 gemma_model = AutoModelForCausalLM.from_pretrained(
     model_name,
     quantization_config=bnb_config,
-    device_map={"": "cuda:0"} if torch.cuda.is_available() else {"": "cpu"}
+    device_map="auto"  # works with accelerate, handles CPU automatically
 )
+
 gemma_tokenizer = AutoTokenizer.from_pretrained(model_name)
 
 gemma_generator = pipeline(
