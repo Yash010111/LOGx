@@ -15,14 +15,15 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 if not HF_TOKEN:
     raise RuntimeError("❌ HF_TOKEN not set. Add it in Render → Environment tab.")
 
-# Using Mistral 7B Instruct — free, reliable, great at structured instructions
-MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3"
+# HF now routes big chat LLMs through third-party inference providers.
+# Together AI (free tier) with Llama 3.1 8B is fully supported for chat.
+MODEL_ID = "meta-llama/Llama-3.1-8B-Instruct"
 
 client = InferenceClient(
-    model=MODEL_ID,
-    token=HF_TOKEN
+    provider="together",   # Together AI handles chat LLMs on free HF tier
+    api_key=HF_TOKEN       # your existing HF token is used for routing
 )
-print(f"✅ Connected to Hugging Face Inference API ({MODEL_ID})")
+print(f"✅ Connected to HF Inference (provider=together, model={MODEL_ID})")
 
 # Global variable to keep the last scenario report
 last_scenario_report = None
@@ -73,6 +74,7 @@ def call_llm(system_prompt: str, user_message: str, max_tokens: int = 500) -> st
     for attempt in range(2):
         try:
             response = client.chat_completion(
+                model=MODEL_ID,
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=0.3,
