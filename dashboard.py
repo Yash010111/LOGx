@@ -1,64 +1,32 @@
-
-from flask import Flask, render_template, request, send_file
-import threading
-import webbrowser
+from flask import Flask, render_template, request, send_file, jsonify
 import os
 import re
-import torch
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    pipeline,
-    BitsAndBytesConfig
-)
-from huggingface_hub import login
+from huggingface_hub import InferenceClient
 import io
 from fpdf import FPDF
+import pandas as pd
 
 app = Flask(__name__)
+
+# ─────────────────────────────────────────────
+# HF Inference API Client Setup
+# ─────────────────────────────────────────────
+HF_TOKEN = os.environ.get("HF_TOKEN")
+if not HF_TOKEN:
+    raise RuntimeError("❌ HF_TOKEN not set. Add it in Render → Environment tab.")
+
+client = InferenceClient(
+    model="google/gemma-2-2b-it",
+    token=HF_TOKEN
+)
+print("✅ Connected to Hugging Face Inference API (Gemma 2B-IT)")
 
 # Global variable to keep the last scenario report
 last_scenario_report = None
 
-# Load HF token securely
-HF_TOKEN = os.environ.get("HF_TOKEN")
-if not HF_TOKEN:
-    raise RuntimeError("❌ HF_TOKEN not set. Run `set HF_TOKEN=hf_xxx...` first.")
-login(HF_TOKEN)
-
-# Check CUDA availability
-if torch.cuda.is_available():
-    device_name = torch.cuda.get_device_name(0)
-    print(f"✅ CUDA is available. Using GPU: {device_name}")
-else:
-    print("⚠️ CUDA not available. The model will run on CPU.")
-
-# Load Gemma 2B quantized
-model_name = "google/gemma-2b-it"
-print("🔹 Loading Gemma 2B 4-bit quantized...")
-
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype="bfloat16"
-)
-
-# Load Gemma 2B quantized
-gemma_model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    quantization_config=bnb_config,
-    device_map="auto"  # works with accelerate, handles CPU automatically
-)
-
-gemma_tokenizer = AutoTokenizer.from_pretrained(model_name)
-
-gemma_generator = pipeline(
-    "text-generation",
-    model=gemma_model,
-    tokenizer=gemma_tokenizer,
-)
-
-# Single log analysis prompt
+# ─────────────────────────────────────────────
+# Prompts
+# ─────────────────────────────────────────────
 SYSTEM_PROMPT = (
     "You are a helpful technical log analysis and troubleshooting expert.\n"
     "When given a log or error message, you:\n"
@@ -73,7 +41,6 @@ SYSTEM_PROMPT = (
     "**Troubleshooting Steps:**\n"
 )
 
-# Scenario-level prompt for multi-log reports
 SCENARIO_PROMPT = (
     "You are a cybersecurity expert specializing in incident analysis.\n"
     "Given a large collection of logs (e.g., 200 lines) describing a suspected crash or attack scenario:\n"
@@ -82,132 +49,140 @@ SCENARIO_PROMPT = (
     "- Provide a clear narrative of the sequence of events.\n"
     "- Suggest recommended actions and mitigations.\n"
     "- Estimate the severity and potential impact.\n"
-    "Write the response as a structured report in professional language, suitable for inclusion in an incident report document."
+    "Write the response as a structured report in professional language, "
+    "suitable for inclusion in an incident report document."
 )
 
+# ─────────────────────────────────────────────
+# Helper: Call HF Inference API
+# ─────────────────────────────────────────────
+def call_gemma(system_prompt: str, user_message: str, max_tokens: int = 500) -> str:
+    import time
+    messages = [
+        {"role": "user", "content": f"{system_prompt}\n\n{user_message}"}
+    ]
+    for attempt in range(2):
+        try:
+            response = client.chat_completion(
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=0.3,
+                top_p=0.9
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            error_str = str(e)
+            if "503" in error_str and attempt == 0:
+                print("⚠️ Model cold-starting. Retrying in 20s...")
+                time.sleep(20)
+            else:
+                print(f"❌ API Error: {error_str}")
+                return f"⚠️ API Error: {error_str}"
+    return "⚠️ Model unavailable after retry. Please try again shortly."
+
+
+# ─────────────────────────────────────────────
+# Health check — Render pings this to confirm app is alive
+# ─────────────────────────────────────────────
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"}), 200
+
+
+# ─────────────────────────────────────────────
+# Routes
+# ─────────────────────────────────────────────
 @app.route("/", methods=["GET", "POST"])
 def index():
     result = None
     if request.method == "POST":
-        log_text = request.form.get("log_input")
+        log_text = request.form.get("log_input", "").strip()
         if not log_text:
             result = {"error": "⚠️ Please enter a log message."}
         else:
-            prompt = (
-                f"{SYSTEM_PROMPT}\n\n"
-                f"Log or error message:\n{log_text}\n\n"
-                "Response:"
+            print("\n🔹 Single log analysis...")
+            raw_text = call_gemma(
+                system_prompt=SYSTEM_PROMPT,
+                user_message=f"Log or error message:\n{log_text}",
+                max_tokens=400
             )
-            print("\n🔹 Sending prompt for single log analysis...")
-            outputs = gemma_generator(
-                prompt,
-                max_new_tokens=400,
-                temperature=0.3,
-                do_sample=True,
-                top_p=0.9
-            )
-            raw_text = outputs[0]["generated_text"][len(prompt):].strip()
-            print("🔹 Raw model output:")
-            print(raw_text)
-            if not raw_text:
-                print("⚠️ WARNING: Empty response from model.")
+            print("🔹 Model output:", raw_text)
 
-            # Extract sections
-            log_type = re.search(r"\*\*Log Type:\*\*\s*(.+)", raw_text)
+            log_type    = re.search(r"\*\*Log Type:\*\*\s*(.+)", raw_text)
             explanation = re.search(r"\*\*Explanation:\*\*\s*(.*?)\n\*\*", raw_text, re.DOTALL)
-            causes = re.search(r"\*\*Possible Root Causes:\*\*\s*(.*?)\n\*\*", raw_text, re.DOTALL)
-            steps = re.search(r"\*\*Troubleshooting Steps:\*\*\s*(.*)", raw_text, re.DOTALL)
+            causes      = re.search(r"\*\*Possible Root Causes:\*\*\s*(.*?)\n\*\*", raw_text, re.DOTALL)
+            steps       = re.search(r"\*\*Troubleshooting Steps:\*\*\s*(.*)", raw_text, re.DOTALL)
 
             result = {
-                "log_type": log_type.group(1).strip() if log_type else "UNKNOWN",
-                "explanation": explanation.group(1).strip() if explanation else "",
-                "possible_root_causes": causes.group(1).strip() if causes else "UNKNOWN",
-                "troubleshooting_steps": steps.group(1).strip() if steps else ""
+                "log_type":              log_type.group(1).strip()    if log_type    else "UNKNOWN",
+                "explanation":           explanation.group(1).strip() if explanation else "",
+                "possible_root_causes":  causes.group(1).strip()      if causes      else "UNKNOWN",
+                "troubleshooting_steps": steps.group(1).strip()       if steps       else ""
             }
 
     return render_template("index.html", result=result)
+
 
 @app.route("/report", methods=["GET", "POST"])
 def report():
     global last_scenario_report
     result = None
     if request.method == "POST":
-        log_text = request.form.get("log_input")
+        log_text = request.form.get("log_input", "").strip()
         if not log_text:
             result = {"error": "⚠️ Please enter Network Crash logs."}
         else:
-            prompt = (
-                f"{SCENARIO_PROMPT}\n\n"
-                f"Logs:\n{log_text}\n\n"
-                "Response:"
+            print("\n🔹 Scenario report generation...")
+            raw_report = call_gemma(
+                system_prompt=SCENARIO_PROMPT,
+                user_message=f"Logs:\n{log_text}",
+                max_tokens=700
             )
-            print("\n🔹 Sending prompt for scenario report generation...")
-            outputs = gemma_generator(
-                prompt,
-                max_new_tokens=700,
-                temperature=0.3,
-                do_sample=True,
-                top_p=0.9
-            )
-            raw_report = outputs[0]["generated_text"][len(prompt):].strip()
-            print("🔹 Raw scenario report:")
-            print(raw_report)
-            if not raw_report:
-                print("⚠️ WARNING: Empty scenario report response from model.")
-
-            # Save the report globally
+            print("🔹 Scenario report:", raw_report)
             last_scenario_report = raw_report
             result = {"report": raw_report}
 
     return render_template("report.html", result=result)
-import pandas as pd
-from collections import Counter
+
+
 @app.route("/visual", methods=["GET", "POST"])
 def visualize():
-    log_data = []
+    log_data   = []
     total_logs = 0
+    error      = None
 
     if request.method == "POST":
         log_file = request.files.get("logfile")
-        if log_file:
-            # Read CSV with expected column names
-            df = pd.read_csv(log_file)
+        if not log_file or log_file.filename == "":
+            error = "⚠️ Please upload a CSV file."
+        else:
+            try:
+                df = pd.read_csv(log_file)
+                if not {"log", "log_type"}.issubset(df.columns):
+                    error = "CSV must contain 'log' and 'log_type' columns."
+                else:
+                    df = df.dropna(subset=["log"])
+                    total_logs = len(df)
+                    grouped = df.groupby(["log", "log_type"]).size().reset_index(name="count")
+                    color_map = {"ERROR": "red", "WARN": "orange", "INFO": "green"}
+                    for _, row in grouped.iterrows():
+                        log_type = row["log_type"].upper()
+                        log_data.append({
+                            "log":   row["log"],
+                            "count": int(row["count"]),
+                            "type":  log_type,
+                            "color": color_map.get(log_type, "gray")
+                        })
+            except Exception as e:
+                error = f"⚠️ Failed to read CSV: {str(e)}"
 
-            required_columns = {"log", "log_type"}
-            if not required_columns.issubset(df.columns):
-                return "CSV must contain 'log' and 'log_type' columns.", 400
+    return render_template("visual.html", log_data=log_data, total_logs=total_logs, error=error)
 
-            # Drop empty logs
-            df = df.dropna(subset=["log"])
-            total_logs = len(df)
-
-            # Count duplicates of the same log message
-            grouped = df.groupby(["log", "log_type"]).size().reset_index(name="count")
-
-            # Assign color based on log_type
-            color_map = {
-                "ERROR": "red",
-                "WARN": "orange",
-                "INFO": "green"
-            }
-
-            for _, row in grouped.iterrows():
-                log_text = row["log"]
-                log_type = row["log_type"].upper()
-                color = color_map.get(log_type, "gray")  # fallback for unknown types
-
-                log_data.append({
-                    "log": log_text,
-                    "count": int(row["count"]),
-                    "type": log_type,
-                    "color": color
-                })
-
-    return render_template("visual.html", log_data=log_data, total_logs=total_logs)
 
 @app.route("/about")
 def about():
     return render_template("about.html")
+
 
 @app.route("/report/pdf")
 def report_pdf():
@@ -215,18 +190,18 @@ def report_pdf():
     pdf.add_page()
     pdf.set_font("Arial", size=12)
     pdf.cell(200, 10, txt="Network Crash Log Report", ln=True, align="C")
-    
+    pdf.ln(5)
+
     if last_scenario_report:
-        # Split into paragraphs
-        paragraphs = last_scenario_report.split("\n\n")
-        for para in paragraphs:
-            pdf.multi_cell(0, 10, txt=para.strip())
-            pdf.ln()
+        for para in last_scenario_report.split("\n\n"):
+            clean = para.strip()
+            if clean:
+                pdf.multi_cell(0, 10, txt=clean)
+                pdf.ln(3)
     else:
         pdf.multi_cell(0, 10, txt="No report available.\n\nPlease generate a report first.")
 
-    # Use dest='S' to get PDF as bytes string
-    pdf_bytes = pdf.output(dest="S").encode("latin1")
+    pdf_bytes  = pdf.output(dest="S").encode("latin1")
     pdf_output = io.BytesIO(pdf_bytes)
 
     return send_file(
@@ -236,21 +211,11 @@ def report_pdf():
         mimetype="application/pdf"
     )
 
-def open_browser():
-    url = "http://127.0.0.1:5000/"
-    try:
-        # Try default Windows browser
-        webbrowser.get(using='windows-default').open(url)
-    except:
-        try:
-            # Try Microsoft Edge
-            webbrowser.get("edge").open(url)
-        except:
-            print(f"⚠️ Could not open browser. Please open {url} manually.")
 
+# ─────────────────────────────────────────────
+# Entry point — for local testing only
+# Render uses gunicorn defined in Procfile/Dockerfile
+# ─────────────────────────────────────────────
 if __name__ == "__main__":
-    # Open browser after 1 second
-    threading.Timer(1, open_browser).start()
-    
-    # Start Flask server
-    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
