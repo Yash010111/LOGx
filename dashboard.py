@@ -15,11 +15,14 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 if not HF_TOKEN:
     raise RuntimeError("❌ HF_TOKEN not set. Add it in Render → Environment tab.")
 
+# Using Mistral 7B Instruct — free, reliable, great at structured instructions
+MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3"
+
 client = InferenceClient(
-    model="google/gemma-2-2b-it",
+    model=MODEL_ID,
     token=HF_TOKEN
 )
-print("✅ Connected to Hugging Face Inference API (Gemma 2B-IT)")
+print(f"✅ Connected to Hugging Face Inference API ({MODEL_ID})")
 
 # Global variable to keep the last scenario report
 last_scenario_report = None
@@ -56,10 +59,16 @@ SCENARIO_PROMPT = (
 # ─────────────────────────────────────────────
 # Helper: Call HF Inference API
 # ─────────────────────────────────────────────
-def call_gemma(system_prompt: str, user_message: str, max_tokens: int = 500) -> str:
+def call_llm(system_prompt: str, user_message: str, max_tokens: int = 500) -> str:
+    """
+    Sends a chat completion request to HF Inference API (Mistral 7B).
+    Uses proper system/user roles for best instruction-following.
+    Retries once on 503 cold-start.
+    """
     import time
     messages = [
-        {"role": "user", "content": f"{system_prompt}\n\n{user_message}"}
+        {"role": "system", "content": system_prompt},
+        {"role": "user",   "content": user_message}
     ]
     for attempt in range(2):
         try:
@@ -101,7 +110,7 @@ def index():
             result = {"error": "⚠️ Please enter a log message."}
         else:
             print("\n🔹 Single log analysis...")
-            raw_text = call_gemma(
+            raw_text = call_llm(
                 system_prompt=SYSTEM_PROMPT,
                 user_message=f"Log or error message:\n{log_text}",
                 max_tokens=400
@@ -133,7 +142,7 @@ def report():
             result = {"error": "⚠️ Please enter Network Crash logs."}
         else:
             print("\n🔹 Scenario report generation...")
-            raw_report = call_gemma(
+            raw_report = call_llm(
                 system_prompt=SCENARIO_PROMPT,
                 user_message=f"Logs:\n{log_text}",
                 max_tokens=700
