@@ -12,15 +12,24 @@ app = Flask(__name__)
 # OpenRouter API Setup
 # ─────────────────────────────────────────────
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+
 if not OPENROUTER_API_KEY:
     raise RuntimeError("❌ OPENROUTER_API_KEY not set. Add it in Render → Environment tab.")
 
-# Specific reliable free model on OpenRouter
-MODEL_ID = "deepseek/deepseek-r1:free"
-
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-print(f"✅ Using OpenRouter (model={MODEL_ID})")
+# OpenRouter's OWN native free models — not routed through Venice or Google AI Studio
+# These use OpenRouter's own infrastructure so they have separate rate limit pools
+FREE_MODELS = [
+    "openrouter/free",                              # OpenRouter's own free router — picks best available
+    "openai/gpt-oss-20b:free",                      # OpenRouter-hosted OpenAI OSS model
+    "openai/gpt-oss-120b:free",                     # Larger OpenRouter-hosted OSS model
+    "nvidia/nemotron-nano-9b-v2:free",              # NVIDIA hosted on OpenRouter
+    "nvidia/nemotron-3-nano-30b-a3b:free",          # NVIDIA larger model
+    "liquid/lfm-2.5-1.2b-instruct:free",            # LiquidAI — very fast, lightweight fallback
+]
+
+print(f"✅ Using OpenRouter native free models ({len(FREE_MODELS)} models, auto-fallback enabled)")
 
 # Global variable to keep the last scenario report
 last_scenario_report = None
@@ -65,13 +74,12 @@ def extract_section(pattern, text, default=""):
 
 
 # ─────────────────────────────────────────────
-# Helper: Call OpenRouter API
+# Helper: Call OpenRouter API with model rotation
 # ─────────────────────────────────────────────
 def call_llm(system_prompt: str, user_message: str, max_tokens: int = 600) -> str:
     """
     Sends a chat completion request to OpenRouter.
-    Retries once on 429 / 503 errors.
-    Fully handles None content, missing keys, and API-level errors.
+    Automatically rotates through FREE_MODELS if one is rate-limited or unavailable.
     """
     import time
 
@@ -82,8 +90,7 @@ def call_llm(system_prompt: str, user_message: str, max_tokens: int = 600) -> st
         "X-Title": "Log Analyzer"
     }
 
-    payload = {
-        "model": MODEL_ID,
+    payload_base = {
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user",   "content": user_message}
@@ -93,28 +100,40 @@ def call_llm(system_prompt: str, user_message: str, max_tokens: int = 600) -> st
         "top_p": 0.9
     }
 
-    for attempt in range(2):
+    for model in FREE_MODELS:
+        print(f"🔹 Trying model: {model}")
+        payload = {**payload_base, "model": model}
+
         try:
             response = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=60)
-
-            # Debug logs — visible in Render log tab
             print(f"🔹 Status: {response.status_code}")
-            print(f"🔹 Raw response: {response.text[:500]}")
+            print(f"🔹 Raw: {response.text[:300]}")
+
+            if response.status_code == 429:
+                print(f"⚠️ {model} rate limited, trying next...")
+                time.sleep(2)
+                continue
+
+            if response.status_code == 404:
+                print(f"⚠️ {model} not found (404), trying next...")
+                continue
+
+            if response.status_code == 401:
+                print("❌ Invalid OpenRouter API key.")
+                return "⚠️ Invalid API key. Please check your OPENROUTER_API_KEY."
 
             response.raise_for_status()
             data = response.json()
 
-            # Check for API-level error embedded in response body
             if "error" in data:
-                err_msg = data["error"].get("message", str(data["error"]))
-                print(f"❌ API body error: {err_msg}")
-                return f"⚠️ API Error: {err_msg}"
+                err = data["error"]
+                print(f"⚠️ {model} body error: {err}, trying next...")
+                continue
 
-            # Safely extract content — handle None, missing keys, delta vs message
             choices = data.get("choices") or []
             if not choices:
-                print("⚠️ Empty choices in response")
-                return "⚠️ Model returned an empty response. Please try again."
+                print(f"⚠️ {model} returned empty choices, trying next...")
+                continue
 
             content = (
                 (choices[0].get("message") or {}).get("content")
@@ -122,29 +141,20 @@ def call_llm(system_prompt: str, user_message: str, max_tokens: int = 600) -> st
             )
 
             if not content:
-                print("⚠️ No content in response:", data)
-                return "⚠️ Model returned no content. Please try again."
+                print(f"⚠️ {model} returned no content, trying next...")
+                continue
 
+            print(f"✅ Success with: {model}")
             return content.strip()
 
         except requests.exceptions.HTTPError as e:
-            status = response.status_code
-            if status in (429, 503) and attempt == 0:
-                print(f"⚠️ HTTP {status}. Retrying in 15s...")
-                time.sleep(15)
-            else:
-                try:
-                    err_body = response.json().get("error", {}).get("message", str(e))
-                except Exception:
-                    err_body = str(e)
-                print(f"❌ API Error {status}: {err_body}")
-                return f"⚠️ API Error {status}: {err_body}"
-
+            print(f"❌ {model} HTTP error: {str(e)}, trying next...")
+            continue
         except Exception as e:
-            print(f"❌ Unexpected error: {str(e)}")
-            return f"⚠️ Unexpected error: {str(e)}"
+            print(f"❌ {model} unexpected error: {str(e)}, trying next...")
+            continue
 
-    return "⚠️ Model unavailable after retry. Please try again shortly."
+    return "⚠️ All models are currently unavailable or rate limited. Please wait a minute and try again."
 
 
 # ─────────────────────────────────────────────
@@ -263,32 +273,55 @@ def about():
     return render_template("about.html")
 
 
+
 @app.route("/report/pdf")
 def report_pdf():
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    pdf.cell(200, 10, txt="Network Crash Log Report", ln=True, align="C")
-    pdf.ln(5)
+    try:
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", "B", 16)
+        pdf.cell(200, 10, txt="Network Crash Log Report", ln=True, align="C")
+        pdf.ln(5)
+        pdf.set_font("Arial", size=11)
 
-    if last_scenario_report:
-        for para in last_scenario_report.split("\n\n"):
-            clean = para.strip()
-            if clean:
-                pdf.multi_cell(0, 10, txt=clean)
-                pdf.ln(3)
-    else:
-        pdf.multi_cell(0, 10, txt="No report available.\n\nPlease generate a report first.")
+        if last_scenario_report:
+            # Clean the text — strip markdown bold (**text**), 
+            # replace special chars that latin1 can't encode
+            clean_report = last_scenario_report
+            clean_report = re.sub(r"\*\*(.*?)\*\*", r"\1", clean_report)  # remove **bold**
+            clean_report = re.sub(r"\*(.*?)\*",     r"\1", clean_report)  # remove *italic*
+            clean_report = clean_report.replace("\u2013", "-")   # en dash
+            clean_report = clean_report.replace("\u2014", "-")   # em dash
+            clean_report = clean_report.replace("\u2019", "'")   # curly apostrophe
+            clean_report = clean_report.replace("\u2018", "'")   # curly open quote
+            clean_report = clean_report.replace("\u201c", '"')   # curly open double quote
+            clean_report = clean_report.replace("\u201d", '"')   # curly close double quote
+            clean_report = clean_report.replace("\u2022", "-")   # bullet point
+            clean_report = clean_report.replace("\u2026", "...") # ellipsis
+            # Final safety — encode to latin1, replacing anything else
+            clean_report = clean_report.encode("latin1", errors="replace").decode("latin1")
 
-    pdf_bytes  = pdf.output(dest="S").encode("latin1")
-    pdf_output = io.BytesIO(pdf_bytes)
+            for para in clean_report.split("\n\n"):
+                clean = para.strip()
+                if clean:
+                    pdf.multi_cell(0, 8, txt=clean)
+                    pdf.ln(3)
+        else:
+            pdf.multi_cell(0, 10, txt="No report available. Please generate a report first.")
 
-    return send_file(
-        pdf_output,
-        download_name="report.pdf",
-        as_attachment=False,
-        mimetype="application/pdf"
-    )
+        pdf_bytes  = pdf.output(dest="S").encode("latin1")
+        pdf_output = io.BytesIO(pdf_bytes)
+
+        return send_file(
+            pdf_output,
+            download_name="report.pdf",
+            as_attachment=False,
+            mimetype="application/pdf"
+        )
+
+    except Exception as e:
+        print(f"❌ PDF generation error: {str(e)}")
+        return f"⚠️ PDF generation failed: {str(e)}", 500
 
 
 # ─────────────────────────────────────────────

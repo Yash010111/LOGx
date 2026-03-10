@@ -1,2 +1,2 @@
 import os
-os.environ["OPENROUTER_API_KEY"] = "PUT YOUR TOKEN HERE"
+os.environ["OPENROUTER_API_KEY"] = ""
