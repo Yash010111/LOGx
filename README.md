@@ -9,6 +9,11 @@
 
 **LOGx** is an intelligent log analysis platform that leverages the Google Gemma 2B AI model to automatically analyze system logs, identify issues, and generate professional incident reports. Perfect for system administrators, DevOps engineers, and security teams who need to process large volumes of logs quickly.
 
+# 🔴 Live Render Test Demo
+
+> **[CLICK HERE FOR DEMO](https://logx-ez78.onrender.com)** 
+>
+> *Uses free LLMs — responses may vary in speed depending on model availability and for testing only not the final devlopment.*
 ### Key Capabilities:
 - **Single Log Analysis**: Classify logs, extract root causes, and get troubleshooting steps
 - **Incident Report Generation**: Analyze multiple logs to create comprehensive incident narratives
