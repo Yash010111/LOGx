@@ -16,7 +16,7 @@ if not OPENROUTER_API_KEY:
     raise RuntimeError("❌ OPENROUTER_API_KEY not set. Add it in Render → Environment tab.")
 
 # Specific reliable free model on OpenRouter
-MODEL_ID = "meta-llama/llama-3.3-70b-instruct:free"
+MODEL_ID = "deepseek/deepseek-r1:free"
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
