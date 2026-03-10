@@ -1,6 +1,5 @@
-flask>=3.0.0
-gunicorn>=21.2.0
-huggingface_hub>=0.23.0
-fpdf>=1.7.2
-pandas>=2.0.0
-python-dotenv>=1.0.0
+flask
+requests
+fpdf
+pandas
+gunicorn
