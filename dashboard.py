@@ -69,17 +69,13 @@ def extract_section(pattern, text, default=""):
 # Helper: Call OpenRouter API
 # ─────────────────────────────────────────────
 def call_llm(system_prompt: str, user_message: str, max_tokens: int = 600) -> str:
-    """
-    Sends a chat completion request to OpenRouter.
-    Retries once on 503 / rate-limit errors.
-    """
     import time
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://loganalyzer.onrender.com",  # optional but recommended by OpenRouter
-        "X-Title": "Log Analyzer"                            # shows up in OpenRouter dashboard
+        "HTTP-Referer": "https://loganalyzer.onrender.com",
+        "X-Title": "Log Analyzer"
     }
 
     payload = {
@@ -98,7 +94,30 @@ def call_llm(system_prompt: str, user_message: str, max_tokens: int = 600) -> st
             response = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=60)
             response.raise_for_status()
             data = response.json()
-            return data["choices"][0]["message"]["content"].strip()
+
+            # DEBUG: print full response so we can see what OpenRouter is returning
+            print("🔹 Full API response:", data)
+
+            # Safely extract content — handle None, missing keys, empty choices
+            choices = data.get("choices") or []
+            if not choices:
+                print("⚠️ Empty choices in response")
+                return "⚠️ Model returned an empty response. Please try again."
+
+            message = choices[0].get("message") or {}
+            content = message.get("content")
+
+            if not content:
+                # Some models return content inside delta instead
+                delta = choices[0].get("delta") or {}
+                content = delta.get("content")
+
+            if not content:
+                print("⚠️ No content in response:", data)
+                return "⚠️ Model returned no content. Please try again."
+
+            return content.strip()
+
         except requests.exceptions.HTTPError as e:
             status = response.status_code
             if status in (429, 503) and attempt == 0:
