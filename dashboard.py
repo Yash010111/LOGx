@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, send_file, jsonify
 import os
 import re
-from huggingface_hub import InferenceClient
+import requests
 import io
 from fpdf import FPDF
 import pandas as pd
@@ -9,22 +9,19 @@ import pandas as pd
 app = Flask(__name__)
 
 # ─────────────────────────────────────────────
-# HF Inference API Client Setup
+# OpenRouter API Setup
 # ─────────────────────────────────────────────
-HF_TOKEN = os.environ.get("HF_TOKEN")
-if not HF_TOKEN:
-    raise RuntimeError("❌ HF_TOKEN not set. Add it in Render → Environment tab.")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+if not OPENROUTER_API_KEY:
+    raise RuntimeError("❌ OPENROUTER_API_KEY not set. Add it in Render → Environment tab.")
 
-# FIX: Use Mistral-7B — non-gated, no approval needed, works with any HF token via Together.
-# Llama models are *gated* on HF and require explicit Meta access approval.
-# Mistral models are open and fully supported by Together AI provider.
-MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3"
+# Free models on OpenRouter — no approval, no gating, no credits needed
+# mistralai/mistral-7b-instruct:free is reliable and fast
+MODEL_ID = "mistralai/mistral-7b-instruct:free"
 
-client = InferenceClient(
-    provider="together",
-    api_key=HF_TOKEN
-)
-print(f"✅ Connected to HF Inference (provider=together, model={MODEL_ID})")
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+print(f"✅ Using OpenRouter (model={MODEL_ID})")
 
 # Global variable to keep the last scenario report
 last_scenario_report = None
@@ -69,36 +66,56 @@ def extract_section(pattern, text, default=""):
 
 
 # ─────────────────────────────────────────────
-# Helper: Call HF Inference API
+# Helper: Call OpenRouter API
 # ─────────────────────────────────────────────
 def call_llm(system_prompt: str, user_message: str, max_tokens: int = 600) -> str:
     """
-    Sends a chat completion request to HF Inference API via Together AI.
-    Retries once on 503 cold-start errors.
+    Sends a chat completion request to OpenRouter.
+    Retries once on 503 / rate-limit errors.
     """
     import time
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user",   "content": user_message}
-    ]
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://loganalyzer.onrender.com",  # optional but recommended by OpenRouter
+        "X-Title": "Log Analyzer"                            # shows up in OpenRouter dashboard
+    }
+
+    payload = {
+        "model": MODEL_ID,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_message}
+        ],
+        "max_tokens": max_tokens,
+        "temperature": 0.3,
+        "top_p": 0.9
+    }
+
     for attempt in range(2):
         try:
-            response = client.chat_completion(
-                model=MODEL_ID,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=0.3,
-                top_p=0.9
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            error_str = str(e)
-            if "503" in error_str and attempt == 0:
-                print("⚠️ Model cold-starting. Retrying in 20s...")
-                time.sleep(20)
+            response = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=60)
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"].strip()
+        except requests.exceptions.HTTPError as e:
+            status = response.status_code
+            if status in (429, 503) and attempt == 0:
+                print(f"⚠️ Rate limit / server busy (HTTP {status}). Retrying in 15s...")
+                time.sleep(15)
             else:
-                print(f"❌ API Error: {error_str}")
-                return f"⚠️ API Error: {error_str}"
+                err_body = ""
+                try:
+                    err_body = response.json().get("error", {}).get("message", str(e))
+                except Exception:
+                    err_body = str(e)
+                print(f"❌ API Error {status}: {err_body}")
+                return f"⚠️ API Error {status}: {err_body}"
+        except Exception as e:
+            print(f"❌ Unexpected error: {str(e)}")
+            return f"⚠️ Unexpected error: {str(e)}"
+
     return "⚠️ Model unavailable after retry. Please try again shortly."
 
 
@@ -129,7 +146,6 @@ def index():
             )
             print("🔹 Model output:", raw_text)
 
-            # FIX: Lookahead-based regex — robust against blank lines and extra spacing
             log_type    = extract_section(
                 r"\*\*Log Type:\*\*\s*(.+?)(?=\n\*\*|\Z)",
                 raw_text, "UNKNOWN"
@@ -152,7 +168,7 @@ def index():
                 "explanation":           explanation,
                 "possible_root_causes":  causes,
                 "troubleshooting_steps": steps,
-                "raw":                   raw_text   # available in template for debug if needed
+                "raw":                   raw_text
             }
 
     return render_template("index.html", result=result)
