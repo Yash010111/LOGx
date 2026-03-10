@@ -15,12 +15,14 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 if not HF_TOKEN:
     raise RuntimeError("❌ HF_TOKEN not set. Add it in Render → Environment tab.")
 
-# FIX: Use the Together-AI supported Turbo variant of Llama 3.1 8B
-MODEL_ID = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+# FIX: Use Mistral-7B — non-gated, no approval needed, works with any HF token via Together.
+# Llama models are *gated* on HF and require explicit Meta access approval.
+# Mistral models are open and fully supported by Together AI provider.
+MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3"
 
 client = InferenceClient(
-    provider="together",   # Together AI handles chat LLMs on free HF tier
-    api_key=HF_TOKEN       # your existing HF token is used for routing
+    provider="together",
+    api_key=HF_TOKEN
 )
 print(f"✅ Connected to HF Inference (provider=together, model={MODEL_ID})")
 
@@ -33,21 +35,21 @@ last_scenario_report = None
 SYSTEM_PROMPT = (
     "You are a helpful technical log analysis and troubleshooting expert.\n"
     "When given a log or error message, you:\n"
-    "1) Classify the log type (INFO, WARN, ERROR). Sometimes it is present in the log itself.\n"
-    "2) Provide an explanation.\n"
-    "3) List possible root causes.\n"
-    "4) List troubleshooting steps.\n"
-    "Use EXACTLY these markdown section headers, each on its own line:\n"
+    "1) Classify the log type (INFO, WARN, or ERROR).\n"
+    "2) Provide a clear explanation of what the log means.\n"
+    "3) List the most likely root causes.\n"
+    "4) List actionable troubleshooting steps.\n\n"
+    "IMPORTANT: Always respond using EXACTLY these four section headers, "
+    "each on its own line with no extra text before the first one:\n"
     "**Log Type:**\n"
     "**Explanation:**\n"
     "**Possible Root Causes:**\n"
     "**Troubleshooting Steps:**\n"
-    "Do not add any text before the first section header."
 )
 
 SCENARIO_PROMPT = (
     "You are a cybersecurity expert specializing in incident analysis.\n"
-    "Given a large collection of logs (e.g., 200 lines) describing a suspected crash or attack scenario:\n"
+    "Given a large collection of logs describing a suspected crash or attack scenario:\n"
     "- Summarize the overall incident.\n"
     "- Identify the main causes and contributing factors.\n"
     "- Provide a clear narrative of the sequence of events.\n"
@@ -61,7 +63,7 @@ SCENARIO_PROMPT = (
 # Helper: Robust section extractor
 # ─────────────────────────────────────────────
 def extract_section(pattern, text, default=""):
-    """Extract a section from model output using a lookahead-based regex."""
+    """Extract a section using lookahead regex — handles blank lines and varied spacing."""
     m = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
     return m.group(1).strip() if m else default
 
@@ -69,11 +71,10 @@ def extract_section(pattern, text, default=""):
 # ─────────────────────────────────────────────
 # Helper: Call HF Inference API
 # ─────────────────────────────────────────────
-def call_llm(system_prompt: str, user_message: str, max_tokens: int = 500) -> str:
+def call_llm(system_prompt: str, user_message: str, max_tokens: int = 600) -> str:
     """
-    Sends a chat completion request to HF Inference API (Llama 3.1 8B Turbo via Together).
-    Uses proper system/user roles for best instruction-following.
-    Retries once on 503 cold-start.
+    Sends a chat completion request to HF Inference API via Together AI.
+    Retries once on 503 cold-start errors.
     """
     import time
     messages = [
@@ -123,28 +124,27 @@ def index():
             print("\n🔹 Single log analysis...")
             raw_text = call_llm(
                 system_prompt=SYSTEM_PROMPT,
-                user_message=f"Log or error message:\n{log_text}",
-                max_tokens=500
+                user_message=f"Analyse this log or error message:\n{log_text}",
+                max_tokens=600
             )
             print("🔹 Model output:", raw_text)
 
-            # FIX: Robust lookahead-based section parsing that handles
-            # varied whitespace, blank lines, and model formatting quirks
+            # FIX: Lookahead-based regex — robust against blank lines and extra spacing
             log_type    = extract_section(
                 r"\*\*Log Type:\*\*\s*(.+?)(?=\n\*\*|\Z)",
                 raw_text, "UNKNOWN"
             )
             explanation = extract_section(
-                r"\*\*Explanation:\*\*\s*(.*?)(?=\n\*\*Possible Root Causes|\Z)",
+                r"\*\*Explanation:\*\*\s*(.*?)(?=\n\*\*Possible Root Causes:|\Z)",
                 raw_text, "No explanation available."
             )
             causes      = extract_section(
-                r"\*\*Possible Root Causes:\*\*\s*(.*?)(?=\n\*\*Troubleshooting Steps|\Z)",
-                raw_text, "UNKNOWN"
+                r"\*\*Possible Root Causes:\*\*\s*(.*?)(?=\n\*\*Troubleshooting Steps:|\Z)",
+                raw_text, "No root causes identified."
             )
             steps       = extract_section(
                 r"\*\*Troubleshooting Steps:\*\*\s*(.*?)(?=\n\*\*[A-Z]|\Z)",
-                raw_text, "No steps available."
+                raw_text, "No troubleshooting steps available."
             )
 
             result = {
@@ -152,7 +152,7 @@ def index():
                 "explanation":           explanation,
                 "possible_root_causes":  causes,
                 "troubleshooting_steps": steps,
-                "raw":                   raw_text  # available in template for debugging if needed
+                "raw":                   raw_text   # available in template for debug if needed
             }
 
     return render_template("index.html", result=result)
@@ -171,7 +171,7 @@ def report():
             raw_report = call_llm(
                 system_prompt=SCENARIO_PROMPT,
                 user_message=f"Logs:\n{log_text}",
-                max_tokens=700
+                max_tokens=800
             )
             print("🔹 Scenario report:", raw_report)
             last_scenario_report = raw_report
