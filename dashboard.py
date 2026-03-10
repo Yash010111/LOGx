@@ -15,9 +15,8 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 if not HF_TOKEN:
     raise RuntimeError("❌ HF_TOKEN not set. Add it in Render → Environment tab.")
 
-# HF now routes big chat LLMs through third-party inference providers.
-# Together AI (free tier) with Llama 3.1 8B is fully supported for chat.
-MODEL_ID = "meta-llama/Llama-3.1-8B-Instruct"
+# FIX: Use the Together-AI supported Turbo variant of Llama 3.1 8B
+MODEL_ID = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
 
 client = InferenceClient(
     provider="together",   # Together AI handles chat LLMs on free HF tier
@@ -38,11 +37,12 @@ SYSTEM_PROMPT = (
     "2) Provide an explanation.\n"
     "3) List possible root causes.\n"
     "4) List troubleshooting steps.\n"
-    "Use clear markdown sections:\n"
+    "Use EXACTLY these markdown section headers, each on its own line:\n"
     "**Log Type:**\n"
     "**Explanation:**\n"
     "**Possible Root Causes:**\n"
     "**Troubleshooting Steps:**\n"
+    "Do not add any text before the first section header."
 )
 
 SCENARIO_PROMPT = (
@@ -58,11 +58,20 @@ SCENARIO_PROMPT = (
 )
 
 # ─────────────────────────────────────────────
+# Helper: Robust section extractor
+# ─────────────────────────────────────────────
+def extract_section(pattern, text, default=""):
+    """Extract a section from model output using a lookahead-based regex."""
+    m = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+    return m.group(1).strip() if m else default
+
+
+# ─────────────────────────────────────────────
 # Helper: Call HF Inference API
 # ─────────────────────────────────────────────
 def call_llm(system_prompt: str, user_message: str, max_tokens: int = 500) -> str:
     """
-    Sends a chat completion request to HF Inference API (Mistral 7B).
+    Sends a chat completion request to HF Inference API (Llama 3.1 8B Turbo via Together).
     Uses proper system/user roles for best instruction-following.
     Retries once on 503 cold-start.
     """
@@ -115,20 +124,35 @@ def index():
             raw_text = call_llm(
                 system_prompt=SYSTEM_PROMPT,
                 user_message=f"Log or error message:\n{log_text}",
-                max_tokens=400
+                max_tokens=500
             )
             print("🔹 Model output:", raw_text)
 
-            log_type    = re.search(r"\*\*Log Type:\*\*\s*(.+)", raw_text)
-            explanation = re.search(r"\*\*Explanation:\*\*\s*(.*?)\n\*\*", raw_text, re.DOTALL)
-            causes      = re.search(r"\*\*Possible Root Causes:\*\*\s*(.*?)\n\*\*", raw_text, re.DOTALL)
-            steps       = re.search(r"\*\*Troubleshooting Steps:\*\*\s*(.*)", raw_text, re.DOTALL)
+            # FIX: Robust lookahead-based section parsing that handles
+            # varied whitespace, blank lines, and model formatting quirks
+            log_type    = extract_section(
+                r"\*\*Log Type:\*\*\s*(.+?)(?=\n\*\*|\Z)",
+                raw_text, "UNKNOWN"
+            )
+            explanation = extract_section(
+                r"\*\*Explanation:\*\*\s*(.*?)(?=\n\*\*Possible Root Causes|\Z)",
+                raw_text, "No explanation available."
+            )
+            causes      = extract_section(
+                r"\*\*Possible Root Causes:\*\*\s*(.*?)(?=\n\*\*Troubleshooting Steps|\Z)",
+                raw_text, "UNKNOWN"
+            )
+            steps       = extract_section(
+                r"\*\*Troubleshooting Steps:\*\*\s*(.*?)(?=\n\*\*[A-Z]|\Z)",
+                raw_text, "No steps available."
+            )
 
             result = {
-                "log_type":              log_type.group(1).strip()    if log_type    else "UNKNOWN",
-                "explanation":           explanation.group(1).strip() if explanation else "",
-                "possible_root_causes":  causes.group(1).strip()      if causes      else "UNKNOWN",
-                "troubleshooting_steps": steps.group(1).strip()       if steps       else ""
+                "log_type":              log_type,
+                "explanation":           explanation,
+                "possible_root_causes":  causes,
+                "troubleshooting_steps": steps,
+                "raw":                   raw_text  # available in template for debugging if needed
             }
 
     return render_template("index.html", result=result)
