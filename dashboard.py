@@ -17,7 +17,7 @@ if not OPENROUTER_API_KEY:
 
 # Free models on OpenRouter — no approval, no gating, no credits needed
 # mistralai/mistral-7b-instruct:free is reliable and fast
-MODEL_ID = "mistralai/mistral-7b-instruct:free"
+MODEL_ID = "openrouter/auto"
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
