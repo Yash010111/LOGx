@@ -15,9 +15,8 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 if not OPENROUTER_API_KEY:
     raise RuntimeError("❌ OPENROUTER_API_KEY not set. Add it in Render → Environment tab.")
 
-# Free models on OpenRouter — no approval, no gating, no credits needed
-# mistralai/mistral-7b-instruct:free is reliable and fast
-MODEL_ID = "openrouter/auto"
+# Specific reliable free model on OpenRouter
+MODEL_ID = "meta-llama/llama-3.3-70b-instruct:free"
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -69,6 +68,11 @@ def extract_section(pattern, text, default=""):
 # Helper: Call OpenRouter API
 # ─────────────────────────────────────────────
 def call_llm(system_prompt: str, user_message: str, max_tokens: int = 600) -> str:
+    """
+    Sends a chat completion request to OpenRouter.
+    Retries once on 429 / 503 errors.
+    Fully handles None content, missing keys, and API-level errors.
+    """
     import time
 
     headers = {
@@ -92,25 +96,30 @@ def call_llm(system_prompt: str, user_message: str, max_tokens: int = 600) -> st
     for attempt in range(2):
         try:
             response = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=60)
+
+            # Debug logs — visible in Render log tab
+            print(f"🔹 Status: {response.status_code}")
+            print(f"🔹 Raw response: {response.text[:500]}")
+
             response.raise_for_status()
             data = response.json()
 
-            # DEBUG: print full response so we can see what OpenRouter is returning
-            print("🔹 Full API response:", data)
+            # Check for API-level error embedded in response body
+            if "error" in data:
+                err_msg = data["error"].get("message", str(data["error"]))
+                print(f"❌ API body error: {err_msg}")
+                return f"⚠️ API Error: {err_msg}"
 
-            # Safely extract content — handle None, missing keys, empty choices
+            # Safely extract content — handle None, missing keys, delta vs message
             choices = data.get("choices") or []
             if not choices:
                 print("⚠️ Empty choices in response")
                 return "⚠️ Model returned an empty response. Please try again."
 
-            message = choices[0].get("message") or {}
-            content = message.get("content")
-
-            if not content:
-                # Some models return content inside delta instead
-                delta = choices[0].get("delta") or {}
-                content = delta.get("content")
+            content = (
+                (choices[0].get("message") or {}).get("content")
+                or (choices[0].get("delta") or {}).get("content")
+            )
 
             if not content:
                 print("⚠️ No content in response:", data)
@@ -121,16 +130,16 @@ def call_llm(system_prompt: str, user_message: str, max_tokens: int = 600) -> st
         except requests.exceptions.HTTPError as e:
             status = response.status_code
             if status in (429, 503) and attempt == 0:
-                print(f"⚠️ Rate limit / server busy (HTTP {status}). Retrying in 15s...")
+                print(f"⚠️ HTTP {status}. Retrying in 15s...")
                 time.sleep(15)
             else:
-                err_body = ""
                 try:
                     err_body = response.json().get("error", {}).get("message", str(e))
                 except Exception:
                     err_body = str(e)
                 print(f"❌ API Error {status}: {err_body}")
                 return f"⚠️ API Error {status}: {err_body}"
+
         except Exception as e:
             print(f"❌ Unexpected error: {str(e)}")
             return f"⚠️ Unexpected error: {str(e)}"
